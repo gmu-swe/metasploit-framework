@@ -28,6 +28,8 @@ class MetasploitModule < Msf::Auxiliary
         OptInt.new('STOPAFTER', [ false, "Stop after x number of consecutive errors",2]),
         OptString.new('USER', [ false, "Username",'anonymous']),
         OptString.new('PASS', [ false, "Password",'mozilla@example.com']),
+        OptString.new('SERVERCMD', [ false, "Command to start the server",'']),
+        OptString.new('SERVERUP', [ false, "String output by the server when ready",'']),
         OptBool.new('FASTFUZZ', [ false, "Only fuzz with cyclic pattern",true]),
         OptBool.new('CONNRESET', [ false, "Break on CONNRESET error",true]),
       ])
@@ -51,6 +53,8 @@ class MetasploitModule < Msf::Auxiliary
       'XCRC','XCWD','XMKD','XPWD','XRMD'
     ]
     @emax = @evilchars.length
+
+    @ftpserver = nil
 
     register_advanced_options(
       [
@@ -89,6 +93,9 @@ class MetasploitModule < Msf::Auxiliary
         ecount += 1
         while count <= datastore['ENDSIZE']
           begin
+            if (datastore['SERVERCMD'] != '')
+                start_server
+            end
             connect
             if datastore['FASTFUZZ']
               evil = Rex::Text.pattern_create(count)
@@ -104,6 +111,9 @@ class MetasploitModule < Msf::Auxiliary
             sock.put("QUIT\r\n")
             select(nil, nil, nil, datastore['DELAY'])
             disconnect
+            if (datastore['SERVERCMD'] != '')
+                stop_server
+            end
 
             count += datastore['STEPSIZE']
 
@@ -142,6 +152,23 @@ class MetasploitModule < Msf::Auxiliary
     else
       datastore['FtpCommands'].split(/[\s,]+/)
     end
+  end
+
+  def start_server()
+      @ftpserver = IO.popen(datastore['SERVERCMD'])
+
+      loop do
+          l = @ftpserver.readline()
+          if l.eql?("#{datastore['SERVERUP']}\n")
+              return
+          end
+      end
+
+  end
+
+  def stop_server()
+      IO.popen("kill -KILL #{@ftpserver.pid}")
+      @ftpserver.close()
   end
 
   def run_host(ip)
@@ -198,11 +225,14 @@ class MetasploitModule < Msf::Auxiliary
           count = datastore['STARTSIZE']
           print_status("Fuzzing command #{cmd} - #{Time.now.localtime}" )
 
-          connect
-          pkt = "USER " + datastore['USER'] + "\r\n"
-          send_pkt(pkt, true)
-          pkt = "PASS " + datastore['PASS'] + "\r\n"
-          send_pkt(pkt, true)
+
+          if (datastore['SERVERCMD'] == '')
+              connect
+              pkt = "USER " + datastore['USER'] + "\r\n"
+              send_pkt(pkt, true)
+              pkt = "PASS " + datastore['PASS'] + "\r\n"
+              send_pkt(pkt, true)
+          end
 
           while count <= datastore['ENDSIZE']
             print_status("  -> Fuzzing size set to #{count}")
@@ -218,8 +248,20 @@ class MetasploitModule < Msf::Auxiliary
                 end
                 print_status(" Command : #{cmd}, Character : #{evilstr} (#{ecount}/#{@emax})")
                 ecount += 1
+                if (datastore['SERVERCMD'] != '')
+                    start_server
+
+                    connect
+                    pkt = "USER " + datastore['USER'] + "\r\n"
+                    send_pkt(pkt, true)
+                    pkt = "PASS " + datastore['PASS'] + "\r\n"
+                    send_pkt(pkt, true)
+                end
                 pkt = cmd + " " + evil + "\r\n"
                 send_pkt(pkt, true)
+                if (datastore['SERVERCMD'] != '')
+                    stop_server
+                end
                 select(nil, nil, nil, datastore['DELAY'])
                 @error_cnt = 0
               end
