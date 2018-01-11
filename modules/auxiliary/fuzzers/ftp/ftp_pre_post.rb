@@ -30,6 +30,8 @@ class MetasploitModule < Msf::Auxiliary
         OptString.new('PASS', [ false, "Password",'mozilla@example.com']),
         OptString.new('SERVERCMD', [ false, "Command to start the server",'']),
         OptString.new('SERVERUP', [ false, "String output by the server when ready",'']),
+        OptString.new('SIGNAL', [ false, "Signal to send the FTP server after each command",'']),
+        OptString.new('PID', [ false, "PID of the FTP server to signal",'']),
         OptBool.new('FASTFUZZ', [ false, "Only fuzz with cyclic pattern",true]),
         OptBool.new('CONNRESET', [ false, "Break on CONNRESET error",true]),
       ])
@@ -93,7 +95,7 @@ class MetasploitModule < Msf::Auxiliary
         ecount += 1
         while count <= datastore['ENDSIZE']
           begin
-            if (datastore['SERVERCMD'] != '')
+            if (@ftpserver == nil && datastore['SERVERCMD'] != '')
                 start_server
             end
             connect
@@ -111,7 +113,9 @@ class MetasploitModule < Msf::Auxiliary
             sock.put("QUIT\r\n")
             select(nil, nil, nil, datastore['DELAY'])
             disconnect
-            if (datastore['SERVERCMD'] != '')
+            if (datastore['SIGNAL'] != '')
+		Process.kill(datastore['SIGNAL'], @ftpserver.pid)
+            elsif (datastore['SERVERCMD'] != '')
                 stop_server
             end
 
@@ -167,8 +171,9 @@ class MetasploitModule < Msf::Auxiliary
   end
 
   def stop_server()
-      IO.popen("kill -KILL #{@ftpserver.pid}")
+      Process.kill("KILL", @ftpserver.pid)
       @ftpserver.close()
+      @ftpserver = nil
   end
 
   def run_host(ip)
@@ -212,6 +217,9 @@ class MetasploitModule < Msf::Auxiliary
             ])
         end
       end
+      if (@ftpserver != nil && datastore['SERVERCMD'] != '')
+        stop_server
+      end
       # Don't progress into stage 5, it must be selected manually.
       #startstage += 1
     end
@@ -248,7 +256,7 @@ class MetasploitModule < Msf::Auxiliary
                 end
                 print_status(" Command : #{cmd}, Character : #{evilstr} (#{ecount}/#{@emax})")
                 ecount += 1
-                if (datastore['SERVERCMD'] != '')
+                if (@ftpserver == nil and datastore['SERVERCMD'] != '')
                     start_server
 
                     connect
@@ -259,7 +267,9 @@ class MetasploitModule < Msf::Auxiliary
                 end
                 pkt = cmd + " " + evil + "\r\n"
                 send_pkt(pkt, true)
-                if (datastore['SERVERCMD'] != '')
+                if (datastore['SIGNAL'] != '')
+                    Process.kill(datastore['SIGNAL'], @ftpserver.pid)
+                elsif (datastore['SERVERCMD'] != '')
                     stop_server
                 end
                 select(nil, nil, nil, datastore['DELAY'])
